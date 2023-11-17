@@ -1,91 +1,82 @@
 import json
-import os
-import tempfile
 import boto3
 from botocore.exceptions import ClientError
 
-# Setting up S3 client
 s3 = boto3.client('s3')
-sns = boto3.client('sns')
 
-def download_file_from_s3(bucket, key, local_file_path):
-    try:
-        s3.download_file(bucket, key, local_file_path)
-        return True
-    except ClientError as e:
-        
-#Sending SNS notification for download error
+class JSONValidator:
+    def is_valid_json(self, json_str):
+        try:
+            json_object = json.loads(json_str)
+            print("JSON syntax is valid.")
+            return True
+        except json.JSONDecodeError as e:
+            print(f"JSON syntax is not valid. Error: {e}")
+            print(f"At line {e.lineno}, column {e.colno}")
+            return False
 
-        sns.publish(
-            TopicArn='sns-topic-arn',
-            Subject='Error downloading file from S3',
-            Message=f"Error downloading file from S3: {e}"
-        )
-        return False
-
-def is_valid_json(json_str):
-    try:
-        json_object = json.loads(json_str)
-        return True
-    except json.JSONDecodeError as e:
-        
-# Sending SNS notification for JSON syntax error
-
-        sns.publish(
-            TopicArn='sns-topic-arn',
-            Subject='JSON Syntax Error',
-            Message=f"JSON syntax is not valid. Error: {e}\nAt line {e.lineno}, column {e.colno}"
-        )
-        return False
-
-    
-def is_valid_json_file(bucket, key):
-    try:
-# Creating a temporary file to download the S3 file
-        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            temp_file_path = temp_file.name
-            if download_file_from_s3(bucket, key, temp_file_path):
-                with open(temp_file_path, 'r') as file:
-                    json_str = file.read()
-                    return is_valid_json(json_str)
-            else:
-                return False
-            
-    except Exception as e:
-        # Send SNS notification for general processing error
-        sns.publish(
-            TopicArn='sns-topic-arn',
-            Subject='Error Processing File',
-            Message=f"Error processing file: {e}"
-        )
-        return False
-    
-    finally:
-# Cleaning up the temporary file
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+    def is_valid_json_s3(self, bucket, key):
+        try:
+            response = s3.get_object(Bucket=bucket, Key=key)
+            json_str = response['Body'].read().decode('utf-8')
+            return self.is_valid_json(json_str)
+        except ClientError as e:
+            print(f"Error accessing S3 object: {e}")
+            return False
 
 def lambda_handler(event, context):
-# Specifying the S3 bucket and key (object key) here
-    bucket_name = "s3-bucket-name"
-    object_key = "path/to/invalid.json"
-    
-    result = is_valid_json_file(bucket_name, object_key)
-    if result:
+    try:
+        # Specifying the S3 bucket name
+        bucket = "ao-json-testing"
+
+        # Retrieving key from the S3 event
+        records = event.get('Records', [])
+        if not records:
+            raise ValueError("No 'Records' key found in the event.")
+
+        s3_event = records[0].get('s3', {})
+        key = s3_event.get('object', {}).get('key', '')
+
+        if not key:
+            raise ValueError("Invalid S3 event structure. 'key' is missing.")
+
+        # Logging the S3 object details
+        print(f"Processing S3 object in bucket: {bucket}, key: {key}")
+
+        # Calling the is_valid_json_s3 function
+        validator = JSONValidator()
+        s3_validation_result = validator.is_valid_json_s3(bucket, key)
+
+        if not s3_validation_result:
+            print(f"S3 object validation failed. Exiting.")
+            return {
+                'statusCode': 400,
+                'body': json.dumps('S3 object validation failed.')
+            }
+
+        # Read the file from S3
+        response = s3.get_object(Bucket=bucket, Key=key)
+        content = json.loads(response['Body'].read().decode('utf-8'))
+        print(content)
+
+        # Validation of JSON content (optional)
+        # json_validation_result = validator.is_valid_json(json.dumps(content))
+        # if not json_validation_result:
+        #     print(f"JSON content validation failed. Exiting.")
+        #     return {
+        #         'statusCode': 400,
+        #         'body': json.dumps('JSON content validation failed.')
+        # }
+
+        print(f"Validation succeeded for S3 object: s3://{bucket}/{key}")
         return {
             'statusCode': 200,
-            'body': json.dumps('JSON validation passed!')
+            'body': json.dumps('Validation completed.')
         }
-    else:
+
+    except Exception as e:
+        print(f"Error in lambda_handler: {str(e)}")
         return {
             'statusCode': 500,
-            'body': json.dumps('JSON validation failed!')
+            'body': json.dumps(f'Internal Server Error: {str(e)}')
         }
-
-
-
-
-
-
-
-
