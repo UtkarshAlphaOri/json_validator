@@ -20,14 +20,28 @@ class JSONValidator:
             response = s3.get_object(Bucket=bucket, Key=key)
             json_str = response['Body'].read().decode('utf-8')
             return self.is_valid_json(json_str)
+            
+            # if not self.is_valid_json(json_str):
+            #     sns = boto3.client('sns')
+            #     # Publish SNS notification if JSON validation fails
+            #     message = f"S3 object validation failed for s3://{bucket}/{key}. Invalid JSON detected."
+            #     subject = "JSON Validation Failed"
+            #     sns.publish(TopicArn=sns_topic_arn, Subject=subject, Message=message)
+            #     return False
+            # return True
         except ClientError as e:
             print(f"Error accessing S3 object: {e}")
             return False
 
-def lambda_handler(event, context):
+def lambda_handler(event_sns, context):
+    #print(event)
+    event_s3 = event_sns['Records'][0]['Sns']['Message']
+    event = json.loads(event_s3)
+    print(event_s3)
     try:
         # Specifying the S3 bucket name
-        bucket = "ao-json-testing"
+        #bucket = "ao-json-testing"
+        bucket = "ao-analytics-voyage"
 
         # Retrieving key from the S3 event
         records = event.get('Records', [])
@@ -39,7 +53,9 @@ def lambda_handler(event, context):
 
         if not key:
             raise ValueError("Invalid S3 event structure. 'key' is missing.")
-
+        
+    #sns_topic_arn = "arn:aws:sns:us-east-1:557555333996:Controller-Voyage"
+        
         # Logging the S3 object details
         print(f"Processing S3 object in bucket: {bucket}, key: {key}")
 
@@ -53,6 +69,7 @@ def lambda_handler(event, context):
                 'statusCode': 400,
                 'body': json.dumps('S3 object validation failed.')
             }
+
 
         # Read the file from S3
         response = s3.get_object(Bucket=bucket, Key=key)
