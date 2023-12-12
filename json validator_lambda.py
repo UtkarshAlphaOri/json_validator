@@ -3,6 +3,8 @@ import boto3
 from botocore.exceptions import ClientError
 
 s3 = boto3.client('s3')
+sns = boto3.client('sns')
+sns_topic_arn = 'arn:aws:sns:us-east-1:557555333996:json_validator'
 
 class JSONValidator:
     def is_valid_json(self, json_str):
@@ -15,20 +17,27 @@ class JSONValidator:
             print(f"At line {e.lineno}, column {e.colno}")
             return False
 
+    # def is_valid_json_s3(self, bucket, key):
+    #     try:
+    #         response = s3.get_object(Bucket=bucket, Key=key)
+    #         json_str = response['Body'].read().decode('utf-8')
+    #         return self.is_valid_json(json_str)
+            
+    #     except ClientError as e:
+    #         print(f"Error accessing S3 object: {e}")
+    #         return False
+    
     def is_valid_json_s3(self, bucket, key):
         try:
             response = s3.get_object(Bucket=bucket, Key=key)
             json_str = response['Body'].read().decode('utf-8')
-            return self.is_valid_json(json_str)
-            
-            # if not self.is_valid_json(json_str):
-            #     sns = boto3.client('sns')
-            #     # Publish SNS notification if JSON validation fails
-            #     message = f"S3 object validation failed for s3://{bucket}/{key}. Invalid JSON detected."
-            #     subject = "JSON Validation Failed"
-            #     sns.publish(TopicArn=sns_topic_arn, Subject=subject, Message=message)
-            #     return False
-            # return True
+            if not self.is_valid_json(json_str):
+                # Publish SNS notification if JSON validation fails
+                message = f"S3 object validation failed for s3://{bucket}/{key}. Invalid JSON detected."
+                subject = "JSON Validation Failed"
+                sns.publish(TopicArn=sns_topic_arn, Subject=subject, Message=message)
+                return False
+            return True
         except ClientError as e:
             print(f"Error accessing S3 object: {e}")
             return False
